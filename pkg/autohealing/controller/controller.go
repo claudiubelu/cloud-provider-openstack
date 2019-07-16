@@ -104,19 +104,19 @@ func createKubeClients(apiserverHost string, kubeConfig string) (*kubernetes.Cli
 
 // NewController creates a new autohealer controller.
 func NewController(conf config.Config) *Controller {
-	// initialize cloud provider
-	provider, err := cloudprovider.GetCloudProvider(conf.CloudProvider, conf)
-	if err != nil {
-		log.Fatalf("Failed to get the cloud provider %s: %v", conf.CloudProvider, err)
-	}
-
-	log.Infof("Using cloud provider: %s", provider.GetName())
-
 	// initialize k8s clients
 	kubeClient, leaderElectionClient, err := createKubeClients(conf.Kubernetes.ApiserverHost, conf.Kubernetes.KubeConfig)
 	if err != nil {
 		log.Fatalf("failed to initialize kubernetes client, error: %v", err)
 	}
+
+	// initialize cloud provider
+	provider, err := cloudprovider.GetCloudProvider(conf.CloudProvider, conf, kubeClient)
+	if err != nil {
+		log.Fatalf("Failed to get the cloud provider %s: %v", conf.CloudProvider, err)
+	}
+
+	log.Infof("Using cloud provider: %s", provider.GetName())
 
 	// event
 	eventBroadcaster := record.NewBroadcaster()
@@ -316,8 +316,6 @@ func (c *Controller) repairNodes(unhealthyNodes []healthcheck.NodeInfo) {
 					} else {
 						log.Infof("Node %s is cordoned", nodeName)
 					}
-
-					// TODO: Deal with the situation that the autohealer is running on a failed node
 				}
 
 				// Start to repair all the unhealthy nodes.
