@@ -156,6 +156,17 @@ func (provider OpenStackCloudProvider) waitForServerPoweredOff(serverID string, 
 	return err
 }
 
+func getServerID(node healthcheck.NodeInfo) string {
+	machineID := uuid.Parse(node.KubeNode.Status.NodeInfo.MachineID)
+	if machineID != nil {
+		return machineID.String()
+	}
+
+	// The OpenStack instance UUID can also be found in the Node's ProviderID with the format:
+	// openstack:///openstack-uuid
+	return strings.TrimPrefix(node.KubeNode.Spec.ProviderID, "openstack:///")
+}
+
 // Repair soft deletes the VMs, marks the heat resource "unhealthy" then trigger Heat stack update in order to rebuild
 // the VMs. The information this function needs:
 // - Nova VM IDs
@@ -180,15 +191,22 @@ func (provider OpenStackCloudProvider) Repair(nodes []healthcheck.NodeInfo) erro
 	}
 
 	for _, n := range nodes {
-		id := uuid.Parse(n.KubeNode.Status.NodeInfo.MachineID)
-		if id == nil {
+		serverID := getServerID(n)
+		if serverID == "" {
 			log.Warningf("Failed to get the correct server ID for server %s", n.KubeNode.Name)
 			continue
 		}
 
-		serverID := id.String()
 		if err := provider.waitForServerPoweredOff(serverID, 30*time.Second); err != nil {
-			log.Warningf("Failed to shutdown the server %s, error: %v, continue handling...", serverID, err)
+			// An error could have occurred because the MachineID did not match the OpenStack instance ID.
+			// We can try again with the ID set in the ProviderID.
+			newServerID := strings.TrimPrefix(n.KubeNode.Spec.ProviderID, "openstack:///")
+			log.Warningf("Failed to shutdown server %s, error: %v, trying again with ID %s", serverID, err, newServerID)
+			if err = provider.waitForServerPoweredOff(newServerID, 30*time.Second); err != nil {
+				log.Warningf("Failed to shutdown server %s, error: %v, continue handling...", newServerID, err)
+			} else {
+				serverID = newServerID
+			}
 		}
 
 		log.Infof("Marking Nova VM %s(Heat resource %s) unhealthy for Heat stack %s", serverID, allMapping[serverID].ResourceID, cluster.StackID)
