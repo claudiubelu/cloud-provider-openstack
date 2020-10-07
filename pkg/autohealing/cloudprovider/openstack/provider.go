@@ -28,7 +28,6 @@ import (
 	"github.com/gophercloud/gophercloud/openstack/containerinfra/v1/clusters"
 	"github.com/gophercloud/gophercloud/openstack/orchestration/v1/stackresources"
 	"github.com/gophercloud/gophercloud/openstack/orchestration/v1/stacks"
-	uuid "github.com/pborman/uuid"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -160,14 +159,10 @@ func (provider OpenStackCloudProvider) waitForServerPoweredOff(serverID string, 
 }
 
 func getServerID(node healthcheck.NodeInfo) string {
-	machineID := uuid.Parse(node.KubeNode.Status.NodeInfo.MachineID)
-	if machineID != nil {
-		return machineID.String()
-	}
-
 	// The OpenStack instance UUID can also be found in the Node's ProviderID with the format:
 	// openstack:///openstack-uuid
-	return strings.TrimPrefix(node.KubeNode.Spec.ProviderID, "openstack:///")
+	instanceID, _ := node.KubeNode.ObjectMeta.Labels["openstack.org/instance-uuid"]
+	return instanceID
 }
 
 // Repair soft deletes the VMs, marks the heat resource "unhealthy" then trigger Heat stack update in order to rebuild
@@ -200,7 +195,7 @@ func (provider OpenStackCloudProvider) Repair(nodes []healthcheck.NodeInfo) erro
 			continue
 		}
 
-		if err := provider.waitForServerPoweredOff(serverID, 30*time.Second); err != nil {
+		if err := provider.waitForServerPoweredOff(serverID, 120*time.Second); err != nil {
 			// An error could have occurred because the MachineID did not match the OpenStack instance ID.
 			// We can try again with the ID set in the ProviderID.
 			newServerID := strings.TrimPrefix(n.KubeNode.Spec.ProviderID, "openstack:///")
